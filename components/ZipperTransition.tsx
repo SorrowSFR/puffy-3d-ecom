@@ -248,13 +248,13 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
           ctx2d.putImageData(imgData, 0, 0);
         }
 
-        // Progress calculation
-        const duration = video.duration || 8.0;
+        // Progress calculation synchronized with exact audio duration (~0.91s)
+        const duration = video.duration || 0.91;
         const currentProgress = Math.min(100, Math.round((video.currentTime / duration) * 100));
         setProgress(currentProgress);
 
-        // Completion condition: jacket is fully unzipped off-screen (~6.8s) or ended
-        if (video.currentTime >= 6.8 || video.ended) {
+        // Completion condition: jacket is fully unzipped off-screen or ended
+        if (video.currentTime >= 0.86 || video.ended) {
           isRunning = false;
           finishTransition();
           return;
@@ -264,8 +264,8 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
       animFrameRef.current = requestAnimationFrame(renderLoop);
     };
 
-    // Initiate playback safely
-    video.playbackRate = 1.25; // Balanced, smooth cinematic unzip
+    // Native 60fps playback matching exact audio duration
+    video.playbackRate = 1.0;
 
     const startPlaying = () => {
       video.play().then(() => {
@@ -289,16 +289,20 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
 
     animFrameRef.current = requestAnimationFrame(renderLoop);
 
-    // Hard fallback safety timeout (7.5s): guarantees reveal under any network stall
+    // Audio end triggers transition completion
+    audio.addEventListener('ended', finishTransition);
+
+    // Snappy fallback safety timeout (1.8s): guarantees reveal never blocks
     const fallbackTimer = setTimeout(() => {
       finishTransition();
-    }, 7500);
+    }, 1800);
 
     return () => {
       isRunning = false;
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       clearTimeout(fallbackTimer);
       video.removeEventListener('canplay', startPlaying);
+      audio.removeEventListener('ended', finishTransition);
       video.pause();
       if (audioRef.current) audioRef.current.pause();
     };
@@ -310,7 +314,7 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
         <motion.div
           key="zipper-video-overlay"
           initial={{ opacity: 1 }}
-          exit={{ opacity: 0, transition: { duration: 0.75, ease: [0.16, 1, 0.3, 1] } }}
+          exit={{ opacity: 0, transition: { duration: 0.45, ease: [0.16, 1, 0.3, 1] } }}
           style={{
             position: 'fixed',
             inset: 0,
