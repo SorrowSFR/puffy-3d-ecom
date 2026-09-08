@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { sound } from '@/lib/sound';
 
@@ -9,16 +9,30 @@ interface ZipperTransitionProps {
 }
 
 export default function ZipperTransition({ onComplete }: ZipperTransitionProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [progress, setProgress] = useState(0);
   const [isRevealed, setIsRevealed] = useState(false);
+  const [hasStartedVideo, setHasStartedVideo] = useState(false);
   const hasCompletedRef = useRef(false);
-  const startTimeRef = useRef<number | null>(null);
-  const animIdRef = useRef<number | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
+  // Dynamic basePath to work seamlessly on Cloudflare Pages, GitHub Pages, and localhost
+  const [basePath, setBasePath] = useState('');
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/puffy-3d-ecom')) {
+      setBasePath('/puffy-3d-ecom');
+    }
+  }, []);
 
   const finishTransition = useCallback(() => {
     if (hasCompletedRef.current) return;
     hasCompletedRef.current = true;
     setIsRevealed(true);
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
     if (onComplete) {
       onComplete();
     }
@@ -29,82 +43,274 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
   }, [finishTransition]);
 
   useEffect(() => {
-    // Attempt audio playback
-    const audio = new Audio('/assets/transitions/zipper-sound.mp3');
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    // Target internal resolution: 1280x720 (crisp 16:9, fast GPU processing)
+    canvas.width = 1280;
+    canvas.height = 720;
+
+    // Prepare audio
+    const audio = new Audio(`${basePath}/assets/transitions/zipper-sound.mp3`);
     audio.volume = 0.85;
+    audioRef.current = audio;
 
     const playAudio = () => {
       audio.play().catch(() => {
-        // Fallback to Web Audio synthesized zipper sound
         sound.playZipper();
       });
     };
 
-    playAudio();
+    // Try WebGL for hardware-accelerated 60fps real-time chroma-key
+    let gl: WebGLRenderingContext | null = null;
+    let shaderProgram: WebGLProgram | null = null;
+    let texture: WebGLTexture | null = null;
+    let isWebGL = false;
 
-    // User gesture listener in case browser blocked autoplay
-    const onUserInteraction = () => {
-      playAudio();
-      window.removeEventListener('pointerdown', onUserInteraction);
-    };
-    window.addEventListener('pointerdown', onUserInteraction);
+    try {
+      gl = canvas.getContext('webgl', {
+        alpha: true,
+        premultipliedAlpha: false,
+        antialias: true,
+      });
 
-    // Smooth, cinematic 2.2-second center unzip animation
-    const DURATION_MS = 2200;
+      if (gl) {
+        // Vertex shader: Full-screen quad
+        const vsSource = `
+          attribute vec2 a_pos;
+          attribute vec2 a_uv;
+          varying vec2 v_uv;
+          void main() {
+            gl_Position = vec4(a_pos, 0.0, 1.0);
+            v_uv = a_uv;
+          }
+        `;
 
-    const animate = (now: number) => {
-      if (startTimeRef.current === null) {
-        startTimeRef.current = now;
+        // Fragment shader: Precise green-screen keying with edge despill
+        const fsSource = `
+          precision mediump float;
+          uniform sampler2D u_tex;
+          varying vec2 v_uv;
+          void main() {
+            vec4 c = texture2D(u_tex, v_uv);
+            float r = c.r;
+            float g = c.g;
+            float b = c.b;
+            float maxRB = max(r, b);
+            float diff = g - maxRB;
+
+            if (g > 0.28 && diff > 0.08) {
+              if (diff > 0.18) {
+                discard;
+              } else {
+                float factor = 1.0 - (diff - 0.08) / 0.10;
+                c.a = c.a * factor;
+                c.g = maxRB;
+                gl_FragColor = c;
+              }
+            } else {
+              gl_FragColor = c;
+            }
+          }
+        `;
+
+        const compileShader = (type: number, src: string) => {
+          const shader = gl!.createShader(type);
+          if (!shader) return null;
+          gl!.shaderSource(shader, src);
+          gl!.compileShader(shader);
+          if (!gl!.getShaderParameter(shader, gl!.COMPILE_STATUS)) {
+            console.warn('Shader compile failed:', gl!.getShaderInfoLog(shader));
+            gl!.deleteShader(shader);
+            return null;
+          }
+          return shader;
+        };
+
+        const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+        const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+
+        if (vs && fs) {
+          shaderProgram = gl.createProgram();
+          if (shaderProgram) {
+            gl.attachShader(shaderProgram, vs);
+            gl.attachShader(shaderProgram, fs);
+            gl.linkProgram(shaderProgram);
+
+            if (gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+              gl.useProgram(shaderProgram);
+
+              // Setup quad geometry
+              const posBuffer = gl.createBuffer();
+              gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+              gl.bufferData(
+                gl.ARRAY_BUFFER,
+                new Float32Array([
+                  -1, -1,
+                   1, -1,
+                  -1,  1,
+                  -1,  1,
+                   1, -1,
+                   1,  1,
+                ]),
+                gl.STATIC_DRAW
+              );
+
+              const aPos = gl.getAttribLocation(shaderProgram, 'a_pos');
+              gl.enableVertexAttribArray(aPos);
+              gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+              const uvBuffer = gl.createBuffer();
+              gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+              // Video texture UVs (Y is inverted in WebGL by default)
+              gl.bufferData(
+                gl.ARRAY_BUFFER,
+                new Float32Array([
+                  0, 1,
+                  1, 1,
+                  0, 0,
+                  0, 0,
+                  1, 1,
+                  1, 0,
+                ]),
+                gl.STATIC_DRAW
+              );
+
+              const aUv = gl.getAttribLocation(shaderProgram, 'a_uv');
+              gl.enableVertexAttribArray(aUv);
+              gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 0, 0);
+
+              // Setup video texture
+              texture = gl.createTexture();
+              gl.bindTexture(gl.TEXTURE_2D, texture);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+              gl.viewport(0, 0, canvas.width, canvas.height);
+              isWebGL = true;
+            }
+          }
+        }
       }
-      const elapsed = now - startTimeRef.current;
-      const t = Math.min(elapsed / DURATION_MS, 1.0);
+    } catch {
+      isWebGL = false;
+    }
 
-      // Smooth custom ease-in-out curve
-      const easeT = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    // 2D fallback context if WebGL is unavailable
+    let ctx2d: CanvasRenderingContext2D | null = null;
+    if (!isWebGL) {
+      canvas.width = 640;
+      canvas.height = 360;
+      ctx2d = canvas.getContext('2d', { willReadFrequently: true });
+    }
 
-      setProgress(Math.round(easeT * 100));
+    let isRunning = true;
 
-      if (t < 1.0) {
-        animIdRef.current = requestAnimationFrame(animate);
-      } else {
-        // Unzip complete!
-        finishTransition();
+    const renderLoop = () => {
+      if (!isRunning || hasCompletedRef.current) return;
+
+      if (video.readyState >= 2 && !video.paused) {
+        setHasStartedVideo(true);
+
+        if (isWebGL && gl && texture) {
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        } else if (ctx2d) {
+          const w = canvas.width;
+          const h = canvas.height;
+          ctx2d.drawImage(video, 0, 0, w, h);
+          const imgData = ctx2d.getImageData(0, 0, w, h);
+          const data = imgData.data;
+          const len = data.length;
+
+          for (let i = 0; i < len; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const maxRB = r > b ? r : b;
+            const diff = g - maxRB;
+            if (g > 70 && diff > 20) {
+              if (diff > 45) {
+                data[i + 3] = 0;
+              } else {
+                const f = 1.0 - (diff - 20) / 25;
+                data[i + 3] = Math.floor(data[i + 3] * f);
+                data[i + 1] = maxRB;
+              }
+            }
+          }
+          ctx2d.putImageData(imgData, 0, 0);
+        }
+
+        // Progress calculation
+        const duration = video.duration || 8.0;
+        const currentProgress = Math.min(100, Math.round((video.currentTime / duration) * 100));
+        setProgress(currentProgress);
+
+        // Completion condition: jacket is fully unzipped off-screen (~6.8s) or ended
+        if (video.currentTime >= 6.8 || video.ended) {
+          isRunning = false;
+          finishTransition();
+          return;
+        }
       }
+
+      animFrameRef.current = requestAnimationFrame(renderLoop);
     };
 
-    animIdRef.current = requestAnimationFrame(animate);
+    // Initiate playback safely
+    video.playbackRate = 1.25; // Balanced, smooth cinematic unzip
 
-    // Hard fallback timeout: guarantees completion within 3.0s under all circumstances
+    const startPlaying = () => {
+      video.play().then(() => {
+        playAudio();
+      }).catch(() => {
+        // Retry on user interaction if browser policy strictly demanded gesture
+        const onFirstTap = () => {
+          video.play().catch(() => {});
+          playAudio();
+          window.removeEventListener('pointerdown', onFirstTap);
+        };
+        window.addEventListener('pointerdown', onFirstTap);
+      });
+    };
+
+    if (video.readyState >= 3) {
+      startPlaying();
+    } else {
+      video.addEventListener('canplay', startPlaying, { once: true });
+    }
+
+    animFrameRef.current = requestAnimationFrame(renderLoop);
+
+    // Hard fallback safety timeout (7.5s): guarantees reveal under any network stall
     const fallbackTimer = setTimeout(() => {
       finishTransition();
-    }, 3000);
+    }, 7500);
 
     return () => {
-      if (animIdRef.current) cancelAnimationFrame(animIdRef.current);
+      isRunning = false;
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       clearTimeout(fallbackTimer);
-      window.removeEventListener('pointerdown', onUserInteraction);
-      audio.pause();
+      video.removeEventListener('canplay', startPlaying);
+      video.pause();
+      if (audioRef.current) audioRef.current.pause();
     };
-  }, [finishTransition]);
-
-  // Normalized progress (0 to 1)
-  const p = progress / 100;
-
-  // Geometry calculations for centered unzipping
-  // The zipper is centered exactly at X = 50%
-  const sliderY = p * 105; // moves from 0% down to 105%
-  const topApertureHalfWidth = p * 58; // top opening widens up to 58% on either side
-
-  const leftClip = `polygon(0% 0%, ${Math.max(0, 50 - topApertureHalfWidth)}% 0%, 50% ${Math.min(100, sliderY)}%, 50% 100%, 0% 100%)`;
-  const rightClip = `polygon(100% 0%, ${Math.min(100, 50 + topApertureHalfWidth)}% 0%, 50% ${Math.min(100, sliderY)}%, 50% 100%, 100% 100%)`;
+  }, [basePath, finishTransition]);
 
   return (
     <AnimatePresence>
       {!isRevealed && (
         <motion.div
-          key="zipper-transition-overlay"
+          key="zipper-video-overlay"
           initial={{ opacity: 1 }}
-          exit={{ opacity: 0, transition: { duration: 0.65, ease: [0.16, 1, 0.3, 1] } }}
+          exit={{ opacity: 0, transition: { duration: 0.75, ease: [0.16, 1, 0.3, 1] } }}
           style={{
             position: 'fixed',
             inset: 0,
@@ -112,222 +318,75 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
             overflow: 'hidden',
             backgroundColor: 'transparent',
             userSelect: 'none',
-            pointerEvents: p > 0.88 ? 'none' : 'auto',
+            pointerEvents: progress > 90 ? 'none' : 'auto',
           }}
         >
-          {/* --------------------------------------------------------------- */}
-          {/* LEFT FLAP: Quilted Down Cushion with Center Seam Clip Path      */}
-          {/* --------------------------------------------------------------- */}
-          <motion.div
+          {/* 1. Initial Poster Image: Shows instantly before first video frame to prevent any blank canvas */}
+          <img
+            src={`${basePath}/assets/transitions/zipper-poster.jpg`}
+            alt="Zipper Cover"
             style={{
               position: 'absolute',
-              inset: 0,
-              clipPath: leftClip,
-              WebkitClipPath: leftClip,
-              backgroundImage: 'url(/assets/transitions/puffer-fabric-bg.jpg)',
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              boxShadow: 'inset -8px 0 25px rgba(0, 0, 0, 0.65)',
-              transform: `translateX(-${p > 0.85 ? (p - 0.85) * 400 : 0}px)`,
-              transition: 'transform 0.1s linear',
-            }}
-          >
-            {/* Iridescent Purple Sheen Overlay */}
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background:
-                  'linear-gradient(135deg, rgba(147, 51, 234, 0.25) 0%, rgba(236, 72, 153, 0.15) 50%, rgba(6, 182, 212, 0.20) 100%)',
-                mixBlendMode: 'color-dodge',
-              }}
-            />
-            {/* Dark Seam Shadow along the center split */}
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                bottom: 0,
-                right: '50%',
-                width: '30px',
-                background: 'linear-gradient(to left, rgba(0,0,0,0.55), transparent)',
-                pointerEvents: 'none',
-              }}
-            />
-          </motion.div>
-
-          {/* --------------------------------------------------------------- */}
-          {/* RIGHT FLAP: Quilted Down Cushion with Center Seam Clip Path     */}
-          {/* --------------------------------------------------------------- */}
-          <motion.div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              clipPath: rightClip,
-              WebkitClipPath: rightClip,
-              backgroundImage: 'url(/assets/transitions/puffer-fabric-bg.jpg)',
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              boxShadow: 'inset 8px 0 25px rgba(0, 0, 0, 0.65)',
-              transform: `translateX(${p > 0.85 ? (p - 0.85) * 400 : 0}px)`,
-              transition: 'transform 0.1s linear',
-            }}
-          >
-            {/* Iridescent Purple Sheen Overlay */}
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                background:
-                  'linear-gradient(135deg, rgba(6, 182, 212, 0.20) 0%, rgba(236, 72, 153, 0.15) 50%, rgba(147, 51, 234, 0.25) 100%)',
-                mixBlendMode: 'color-dodge',
-              }}
-            />
-            {/* Dark Seam Shadow along the center split */}
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                bottom: 0,
-                left: '50%',
-                width: '30px',
-                background: 'linear-gradient(to right, rgba(0,0,0,0.55), transparent)',
-                pointerEvents: 'none',
-              }}
-            />
-          </motion.div>
-
-          {/* --------------------------------------------------------------- */}
-          {/* CENTER METALLIC ZIPPER TRACK (Only below slider position)       */}
-          {/* --------------------------------------------------------------- */}
-          <div
-            style={{
-              position: 'absolute',
-              top: `${Math.min(100, sliderY)}%`,
-              bottom: 0,
+              top: '50%',
               left: '50%',
-              transform: 'translateX(-50%)',
-              width: '12px',
-              display: p < 0.96 ? 'flex' : 'none',
-              flexDirection: 'column',
-              alignItems: 'center',
+              transform: 'translate(-50%, -50%)',
+              width: '100vw',
+              height: '100vh',
+              objectFit: 'cover',
+              objectPosition: 'center',
+              display: hasStartedVideo ? 'none' : 'block',
               pointerEvents: 'none',
-              zIndex: 10,
-              boxShadow: '0 0 10px rgba(0, 0, 0, 0.6)',
             }}
-          >
-            {/* Interlocking Chrome Teeth Pattern */}
-            <div
-              style={{
-                width: '10px',
-                height: '100%',
-                background:
-                  'repeating-linear-gradient(0deg, #d1d5db 0px, #d1d5db 3px, #4b5563 3px, #1f2937 6px)',
-                borderRadius: '2px',
-                border: '1px solid rgba(255, 255, 255, 0.35)',
-              }}
-            />
-          </div>
+          />
 
-          {/* --------------------------------------------------------------- */}
-          {/* METALLIC ZIPPER SLIDER & PULL TAB (Glides down Center X = 50%)   */}
-          {/* --------------------------------------------------------------- */}
-          {p < 0.98 && (
-            <div
-              style={{
-                position: 'absolute',
-                top: `${sliderY}%`,
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                zIndex: 20,
-                pointerEvents: 'none',
-                filter: 'drop-shadow(0 6px 16px rgba(0,0,0,0.75))',
-              }}
-            >
-              {/* Metallic Slider Body */}
-              <div
-                style={{
-                  width: '34px',
-                  height: '42px',
-                  background: 'linear-gradient(135deg, #f8fafc 0%, #cbd5e1 35%, #64748b 70%, #94a3b8 100%)',
-                  borderRadius: '6px',
-                  border: '1.5px solid rgba(255, 255, 255, 0.85)',
-                  boxShadow: 'inset 0 1px 3px rgba(255, 255, 255, 0.9), 0 4px 12px rgba(0, 0, 0, 0.5)',
-                  position: 'relative',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                {/* Center Ridge */}
-                <div
-                  style={{
-                    width: '4px',
-                    height: '24px',
-                    background: 'linear-gradient(180deg, #ffffff, #475569)',
-                    borderRadius: '2px',
-                  }}
-                />
-              </div>
+          {/* 2. Hidden DOM Video Element for Reliable Native Decoding & Autoplay Compliance */}
+          <video
+            ref={videoRef}
+            src={`${basePath}/assets/transitions/zipper-reveal.mp4`}
+            playsInline
+            muted
+            autoPlay
+            preload="auto"
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '1px',
+              height: '1px',
+              opacity: 0.001,
+              pointerEvents: 'none',
+              zIndex: -1,
+            }}
+          />
 
-              {/* Dangling Pull Tab with PUFFY Engraving */}
-              <div
-                style={{
-                  width: '24px',
-                  height: '48px',
-                  margin: '-4px auto 0',
-                  background: 'linear-gradient(180deg, #e2e8f0 0%, #94a3b8 60%, #475569 100%)',
-                  borderRadius: '4px 4px 10px 10px',
-                  border: '1.5px solid rgba(255, 255, 255, 0.75)',
-                  boxShadow: '0 6px 14px rgba(0, 0, 0, 0.55)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <span
-                  style={{
-                    writingMode: 'vertical-rl',
-                    fontSize: '0.62rem',
-                    fontWeight: 900,
-                    letterSpacing: '0.18em',
-                    color: '#1e293b',
-                    textShadow: '0 1px 1px rgba(255, 255, 255, 0.6)',
-                  }}
-                >
-                  PUFFY
-                </span>
-              </div>
+          {/* 3. Centered Video Keying Canvas (Hardware WebGL Shader with 2D Fallback) */}
+          <canvas
+            ref={canvasRef}
+            style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '100vw',
+              height: '100vh',
+              objectFit: 'cover',
+              objectPosition: 'center',
+              display: 'block',
+              pointerEvents: 'none',
+            }}
+          />
 
-              {/* Sparkle Glint at Slider Nose */}
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '-6px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  width: '16px',
-                  height: '16px',
-                  background: 'radial-gradient(circle, #ffffff 20%, rgba(0, 245, 255, 0.8) 60%, transparent 80%)',
-                  borderRadius: '50%',
-                  filter: 'blur(1px)',
-                }}
-              />
-            </div>
-          )}
-
-          {/* --------------------------------------------------------------- */}
-          {/* LUXURY STATUS BAR (Bottom Center)                               */}
-          {/* --------------------------------------------------------------- */}
+          {/* 4. Luxury "Unzipping Collection" Status Indicator (Perfect Center Alignment) */}
           <div
             style={{
               position: 'absolute',
               bottom: '36px',
-              left: '50%',
-              transform: 'translateX(-50%)',
+              left: 0,
+              right: 0,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '10px',
               pointerEvents: 'none',
               zIndex: 30,
@@ -338,13 +397,13 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
                 display: 'flex',
                 alignItems: 'center',
                 gap: '9px',
-                background: 'rgba(15, 6, 30, 0.75)',
+                background: 'rgba(15, 6, 30, 0.80)',
                 backdropFilter: 'blur(20px)',
                 WebkitBackdropFilter: 'blur(20px)',
-                padding: '8px 22px',
+                padding: '8px 24px',
                 borderRadius: '999px',
                 border: '1px solid rgba(255, 255, 255, 0.18)',
-                boxShadow: '0 10px 30px rgba(0, 0, 0, 0.6)',
+                boxShadow: '0 10px 30px rgba(0, 0, 0, 0.65)',
               }}
             >
               <span
@@ -359,7 +418,7 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
               />
               <span
                 style={{
-                  color: 'rgba(255, 255, 255, 0.88)',
+                  color: 'rgba(255, 255, 255, 0.90)',
                   fontSize: '0.74rem',
                   fontWeight: 800,
                   letterSpacing: '0.18em',
@@ -402,9 +461,7 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
             </div>
           </div>
 
-          {/* --------------------------------------------------------------- */}
-          {/* SKIP BUTTON (Top Right)                                         */}
-          {/* --------------------------------------------------------------- */}
+          {/* 5. Discreet "Skip Reveal" Button (Top Right) */}
           <button
             type="button"
             onClick={handleSkip}
@@ -417,7 +474,7 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
               backdropFilter: 'blur(16px)',
               WebkitBackdropFilter: 'blur(16px)',
               border: '1px solid rgba(255, 255, 255, 0.18)',
-              color: 'rgba(255, 255, 255, 0.75)',
+              color: 'rgba(255, 255, 255, 0.80)',
               fontSize: '0.72rem',
               fontWeight: 700,
               letterSpacing: '0.14em',
@@ -425,6 +482,7 @@ export default function ZipperTransition({ onComplete }: ZipperTransitionProps) 
               padding: '6px 14px',
               borderRadius: '999px',
               cursor: 'pointer',
+              pointerEvents: 'auto',
               transition: 'all 0.2s ease',
             }}
           >
