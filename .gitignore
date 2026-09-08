@@ -1,0 +1,45 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js build and export
+/.next/
+/out/
+build/
+
+# production
+/build
+
+# 3D model high-poly raw originals (too large for git)
+/originals_backup/
+Meshy_AI_*.glb
+ChatGPT Image *.png
+Animate_logo_letters_*.mp4
+
+# scratch directory
+/scratch/
+
+# misc
+.DS_Store
+*.pem
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# local env files
+.env*.local
+
+# vercel & cloudflare
+.vercel
+.wrangler
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts

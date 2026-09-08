@@ -1,0 +1,255 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Syne:wght@700;800&display=swap');
+
+:root {
+  --c-lavender: #B57CFF;
+  --c-white: #F7F9FF;
+  --c-pink: #FF4FD8;
+  --c-blue: #00D9FF;
+  --c-lilac: #DCC6FF;
+  --c-silver: #C9D7FF;
+  --c-deep-violet: #0a0116;
+  --c-mid-violet: #15052e;
+  --c-surface: rgba(255, 255, 255, 0.05);
+  --c-surface-hover: rgba(255, 255, 255, 0.12);
+  --c-border: rgba(255, 255, 255, 0.15);
+  --c-border-active: rgba(181, 124, 255, 0.6);
+  --glow-lavender: rgba(181, 124, 255, 0.4);
+  --glow-pink: rgba(255, 79, 216, 0.35);
+  --glow-blue: rgba(0, 217, 255, 0.35);
+  --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: 'Outfit', sans-serif;
+  --font-editorial: 'Syne', sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  background-color: var(--c-deep-violet);
+  color: var(--c-white);
+  font-family: var(--font-body);
+  overflow-x: clip;
+  min-height: 100vh;
+  cursor: default;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--c-pink);
+  color: #fff;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #080112;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--c-lavender), var(--c-pink));
+  border-radius: 999px;
+}
+
+/* Typography Utilities */
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-editorial {
+  font-family: var(--font-editorial);
+  letter-spacing: -0.04em;
+}
+
+.gradient-text-iridescent {
+  background: linear-gradient(135deg, #FFFFFF 0%, #E8DCFF 25%, #FFB6F5 50%, #8FEAFF 80%, #FFFFFF 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-size: 200% auto;
+  animation: shineGradient 8s linear infinite;
+}
+
+.gradient-text-pink-blue {
+  background: linear-gradient(90deg, #FF4FD8 0%, #B57CFF 50%, #00D9FF 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Glassmorphic Surfaces */
+.glass-panel {
+  background: rgba(25, 8, 48, 0.55);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 28px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9999px;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.glass-pill:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
+}
+
+/* Squishy Button Interactions */
+.btn-squish {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 36px;
+  border-radius: 9999px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease;
+  will-change: transform;
+}
+
+.btn-squish:hover {
+  transform: scale(1.05, 0.95);
+}
+
+.btn-squish:active {
+  transform: scale(0.94, 1.08);
+}
+
+.btn-squish-primary {
+  background: linear-gradient(135deg, #B57CFF 0%, #FF4FD8 100%);
+  color: #FFFFFF;
+  box-shadow: 0 12px 30px rgba(255, 79, 216, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.4);
+}
+
+.btn-squish-primary:hover {
+  box-shadow: 0 18px 40px rgba(255, 79, 216, 0.6), 0 0 50px rgba(181, 124, 255, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.6);
+}
+
+.btn-squish-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: var(--c-white);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.btn-squish-secondary:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: var(--c-blue);
+  box-shadow: 0 14px 35px rgba(0, 217, 255, 0.3);
+}
+
+/* Reflective Grid Floor */
+.reflective-grid-container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 55%;
+  perspective: 600px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.reflective-grid-mesh {
+  position: absolute;
+  top: 0;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  transform: rotateX(72deg) translateZ(0);
+  background-image: 
+    linear-gradient(to right, rgba(181, 124, 255, 0.22) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 217, 255, 0.22) 1px, transparent 1px);
+  background-size: 80px 80px;
+  mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,1) 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,1) 100%);
+  animation: gridDrift 20s linear infinite;
+}
+
+.reflective-horizon-glow {
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80vw;
+  height: 240px;
+  background: radial-gradient(ellipse at center, rgba(255, 79, 216, 0.35) 0%, rgba(181, 124, 255, 0.25) 35%, rgba(0, 217, 255, 0.1) 60%, transparent 80%);
+  filter: blur(40px);
+  pointer-events: none;
+}
+
+/* Animations */
+@keyframes shineGradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes gridDrift {
+  0% { transform: rotateX(72deg) translateY(0); }
+  100% { transform: rotateX(72deg) translateY(80px); }
+}
+
+@keyframes floatSlow {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-14px) rotate(2deg); }
+}
+
+@keyframes floatFast {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(-2deg); }
+}
+
+@keyframes squishBounce {
+  0% { transform: scale(1, 1); }
+  25% { transform: scale(1.2, 0.8); }
+  50% { transform: scale(0.88, 1.15); }
+  75% { transform: scale(1.05, 0.95); }
+  100% { transform: scale(1, 1); }
+}
+
+.anim-float-slow {
+  animation: floatSlow 6s ease-in-out infinite;
+}
+
+.anim-float-fast {
+  animation: floatFast 4s ease-in-out infinite;
+}
+
+.anim-squish {
+  animation: squishBounce 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Badges & Tags */
+.plushy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--c-silver);
+}
