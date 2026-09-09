@@ -14,8 +14,9 @@ build/
 # production
 /build
 
-# 3D model high-poly raw originals (too large for git)
+# 3D model high-poly raw originals & uncompressed source assets
 /originals_backup/
+/raw_assets/
 Meshy_AI_*.glb
 ChatGPT Image *.png
 Animate_logo_letters_*.mp4
